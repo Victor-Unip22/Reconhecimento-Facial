@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import messagebox
 import cv2
 import os
 import sqlite3
@@ -69,7 +70,7 @@ def cadastrar_usuario():
 
 # Função para treinar o reconhecimento facial
 def login_reconhecimento_facial(caminho_imagens):
-    caminho_haarcascade = r'C:\Users\victo\Documents\UNIP\APS 6 Semestre_CC\.venv\Lib\site-packages\cv2\data\haarcascade_frontalface_default.xml'
+    caminho_haarcascade = r'C:\\Users\\vanil\\Documents\\APS 6 Semestre_CC\\haarcascade_frontalface_default.xml'
     classificador = cv2.CascadeClassifier(caminho_haarcascade)
 
     if classificador.empty():
@@ -113,8 +114,9 @@ def login_reconhecimento_facial_usuario():
 
     cam = cv2.VideoCapture(0)
     cv2.namedWindow("Reconhecimento Facial")
+    reconhecido = False  # Variável para controle de reconhecimento
 
-    while True:
+    while not reconhecido:
         print("Capturando imagem para reconhecimento...")
         ret, frame = cam.read()
         if not ret:
@@ -131,17 +133,15 @@ def login_reconhecimento_facial_usuario():
             id_usuario, confianca = reconhecedor.predict(imagem_gray[y:y+h, x:x+w])
             print(f"ID do usuário detectado: {id_usuario}, Confiança: {confianca}")
 
-            # Alterado para imprimir o ID antes de consultar o nome
-            print(f"ID do usuário reconhecido: {id_usuario}")
-
             # Verificar se o ID do usuário é válido e consultar o nome
-            if confianca < 50:  # Ajuste o limiar de confiança aqui
-                c.execute("SELECT nome FROM usuarios WHERE id=?", (id_usuario,))
+            if confianca < 60:  # Ajuste o limiar de confiança aqui
+                c.execute("SELECT nome FROM usuarios WHERE id=?", (id_usuario + 1,))  # Ajuste conforme necessário
                 resultado = c.fetchone()
                 if resultado:
                     nome_usuario = resultado[0]
                     print(f"Usuário reconhecido: {nome_usuario}")
-                    cv2.putText(frame, f'Bem-vindo {nome_usuario}', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    messagebox.showinfo("Acesso Liberado", f"Acesso liberado com sucesso! Bem-vindo, {nome_usuario}")
+                    reconhecido = True  # Marcar como reconhecido
                 else:
                     print("Usuário desconhecido para o ID fornecido.")
                     cv2.putText(frame, 'Usuario desconhecido', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
@@ -160,6 +160,10 @@ def login_reconhecimento_facial_usuario():
 
     cam.release()
     cv2.destroyAllWindows()
+    if reconhecido:
+        # Após o reconhecimento, retorne à tela inicial (opcionalmente você pode redefinir campos)
+        print("Retornando à tela inicial...")
+        # Aqui você pode adicionar qualquer lógica para redefinir o estado da aplicação, se necessário.
 
 # Criação da janela principal
 root = tk.Tk()
@@ -195,3 +199,6 @@ btn_reconhecer.grid(row=5, column=1, padx=10, pady=10)
 
 # Iniciar o loop da interface gráfica
 root.mainloop()
+
+# Fechar a conexão com o banco de dados ao final
+conn.close()
