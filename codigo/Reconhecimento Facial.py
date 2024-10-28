@@ -21,12 +21,16 @@ CREATE TABLE IF NOT EXISTS usuarios (
 ''')
 conn.commit()
 
+# Função para criar diretório
+def criar_diretorio(caminho):
+    if not os.path.exists(caminho):
+        os.makedirs(caminho)
+
 # Função para capturar fotos
 def capturar_foto(usuario_nome):
     caminho_diretorio = "imagens/" + usuario_nome
-    if not os.path.exists(caminho_diretorio):
-        os.makedirs(caminho_diretorio)
-    
+    criar_diretorio(caminho_diretorio)
+
     cam = cv2.VideoCapture(0)
     cv2.namedWindow("Capturar Foto")
     contador = 0
@@ -37,7 +41,7 @@ def capturar_foto(usuario_nome):
             print("Falha ao capturar a imagem")
             break
         cv2.imshow("Capturar Foto", frame)
-        
+
         k = cv2.waitKey(1)
         if k % 256 == 27:  # ESC
             print("Fechando sem salvar.")
@@ -47,10 +51,10 @@ def capturar_foto(usuario_nome):
             cv2.imwrite(img_name, frame)
             print(f"Foto {img_name} salva!")
             contador += 1
-    
+
     cam.release()
     cv2.destroyAllWindows()
-    
+
     return caminho_diretorio
 
 # Função para cadastrar o usuário no banco de dados
@@ -58,12 +62,16 @@ def cadastrar_usuario():
     nome = entry_nome.get()
     email = entry_email.get()
     numero = entry_numero.get()
-    
+
+    if not nome or not email or not numero:
+        messagebox.showwarning("Campos Vazios", "Por favor, preencha todos os campos.")
+        return
+
     # Capturar fotos do usuário
     caminho_fotos = capturar_foto(nome)
-    
+
     # Armazenar dados no banco de dados
-    c.execute('INSERT INTO usuarios (nome, email, numero, caminho_fotos) VALUES (?, ?, ?, ?)', 
+    c.execute('INSERT INTO usuarios (nome, email, numero, caminho_fotos) VALUES (?, ?, ?, ?)',
               (nome, email, numero, caminho_fotos))
     conn.commit()
     print(f"Usuário cadastrado: {nome}, {email}, {numero}, Fotos armazenadas em: {caminho_fotos}")
@@ -75,25 +83,31 @@ def login_reconhecimento_facial(caminho_imagens):
 
     if classificador.empty():
         raise FileNotFoundError("Arquivo haarcascade_frontalface_default.xml não encontrado. Verifique o caminho.")
-    
+
     rostos = []
     rosto_ids = []
 
-    for usuario_id, usuario in enumerate(os.listdir(caminho_imagens)):
-        for imagem_nome in os.listdir(os.path.join(caminho_imagens, usuario)):
-            imagem_path = os.path.join(caminho_imagens, usuario, imagem_nome)
-            imagem = cv2.imread(imagem_path)
+    # Pegar todos os usuários do banco de dados
+    c.execute("SELECT id, nome FROM usuarios")
+    usuarios = c.fetchall()
 
-            if imagem is None:
-                print(f"Imagem não carregada: {imagem_path}")
-                continue
-            
-            imagem_gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
-            rostos_detectados = classificador.detectMultiScale(imagem_gray, scaleFactor=1.3, minNeighbors=5)
+    for usuario_id, usuario_nome in usuarios:
+        caminho_usuario = os.path.join(caminho_imagens, usuario_nome)
+        if os.path.exists(caminho_usuario):
+            for imagem_nome in os.listdir(caminho_usuario):
+                imagem_path = os.path.join(caminho_usuario, imagem_nome)
+                imagem = cv2.imread(imagem_path)
 
-            for (x, y, w, h) in rostos_detectados:
-                rostos.append(imagem_gray[y:y+h, x:x+w])
-                rosto_ids.append(usuario_id)
+                if imagem is None:
+                    print(f"Imagem não carregada: {imagem_path}")
+                    continue
+
+                imagem_gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
+                rostos_detectados = classificador.detectMultiScale(imagem_gray, scaleFactor=1.3, minNeighbors=5)
+
+                for (x, y, w, h) in rostos_detectados:
+                    rostos.append(imagem_gray[y:y+h, x:x+w])
+                    rosto_ids.append(usuario_id)  # Use o id do banco de dados
 
     if len(rostos) > 0:
         reconhecedor = cv2.face.LBPHFaceRecognizer_create()
@@ -135,7 +149,7 @@ def login_reconhecimento_facial_usuario():
 
             # Verificar se o ID do usuário é válido e consultar o nome
             if confianca < 60:  # Ajuste o limiar de confiança aqui
-                c.execute("SELECT nome FROM usuarios WHERE id=?", (id_usuario + 1,))  # Ajuste conforme necessário
+                c.execute("SELECT nome FROM usuarios WHERE id=?", (id_usuario,))  # Não adicione 1 aqui
                 resultado = c.fetchone()
                 if resultado:
                     nome_usuario = resultado[0]
@@ -160,10 +174,6 @@ def login_reconhecimento_facial_usuario():
 
     cam.release()
     cv2.destroyAllWindows()
-    if reconhecido:
-        # Após o reconhecimento, retorne à tela inicial (opcionalmente você pode redefinir campos)
-        print("Retornando à tela inicial...")
-        # Aqui você pode adicionar qualquer lógica para redefinir o estado da aplicação, se necessário.
 
 # Criação da janela principal
 root = tk.Tk()
