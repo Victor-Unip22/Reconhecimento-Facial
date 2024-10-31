@@ -1,9 +1,10 @@
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import cv2
 import os
 import sqlite3
 import numpy as np
+from datetime import datetime
 
 # Conectar ao banco de dados (ou criar um novo)
 conn = sqlite3.connect('usuarios.db')
@@ -21,12 +22,11 @@ CREATE TABLE IF NOT EXISTS usuarios (
 ''')
 conn.commit()
 
-# Função para criar diretório
+# Funções para captura de fotos e cadastro do usuário
 def criar_diretorio(caminho):
     if not os.path.exists(caminho):
         os.makedirs(caminho)
 
-# Função para capturar fotos
 def capturar_foto(usuario_nome):
     caminho_diretorio = "imagens/" + usuario_nome
     criar_diretorio(caminho_diretorio)
@@ -38,26 +38,19 @@ def capturar_foto(usuario_nome):
     while contador < 10:
         ret, frame = cam.read()
         if not ret:
-            print("Falha ao capturar a imagem")
             break
         cv2.imshow("Capturar Foto", frame)
 
         k = cv2.waitKey(1)
-        if k % 256 == 27:  # ESC
-            print("Fechando sem salvar.")
-            break
-        elif k % 256 == 32:  # SPACE
+        if k % 256 == 32:  # Espaço para capturar
             img_name = f"{caminho_diretorio}/foto_{contador}.png"
             cv2.imwrite(img_name, frame)
-            print(f"Foto {img_name} salva!")
             contador += 1
 
     cam.release()
     cv2.destroyAllWindows()
-
     return caminho_diretorio
 
-# Função para cadastrar o usuário no banco de dados
 def cadastrar_usuario():
     nome = entry_nome.get()
     email = entry_email.get()
@@ -67,27 +60,19 @@ def cadastrar_usuario():
         messagebox.showwarning("Campos Vazios", "Por favor, preencha todos os campos.")
         return
 
-    # Capturar fotos do usuário
     caminho_fotos = capturar_foto(nome)
-
-    # Armazenar dados no banco de dados
     c.execute('INSERT INTO usuarios (nome, email, numero, caminho_fotos) VALUES (?, ?, ?, ?)',
               (nome, email, numero, caminho_fotos))
     conn.commit()
-    print(f"Usuário cadastrado: {nome}, {email}, {numero}, Fotos armazenadas em: {caminho_fotos}")
+    messagebox.showinfo("Cadastro", f"Usuário {nome} cadastrado com sucesso!")
 
-# Função para treinar o reconhecimento facial
 def login_reconhecimento_facial(caminho_imagens):
-    caminho_haarcascade = r'C:\\Users\\vanil\\Documents\\APS 6 Semestre_CC\\haarcascade_frontalface_default.xml'
+    caminho_haarcascade = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
     classificador = cv2.CascadeClassifier(caminho_haarcascade)
-
-    if classificador.empty():
-        raise FileNotFoundError("Arquivo haarcascade_frontalface_default.xml não encontrado. Verifique o caminho.")
 
     rostos = []
     rosto_ids = []
 
-    # Pegar todos os usuários do banco de dados
     c.execute("SELECT id, nome FROM usuarios")
     usuarios = c.fetchall()
 
@@ -99,7 +84,6 @@ def login_reconhecimento_facial(caminho_imagens):
                 imagem = cv2.imread(imagem_path)
 
                 if imagem is None:
-                    print(f"Imagem não carregada: {imagem_path}")
                     continue
 
                 imagem_gray = cv2.cvtColor(imagem, cv2.COLOR_BGR2GRAY)
@@ -107,108 +91,132 @@ def login_reconhecimento_facial(caminho_imagens):
 
                 for (x, y, w, h) in rostos_detectados:
                     rostos.append(imagem_gray[y:y+h, x:x+w])
-                    rosto_ids.append(usuario_id)  # Use o id do banco de dados
+                    rosto_ids.append(usuario_id)
 
     if len(rostos) > 0:
         reconhecedor = cv2.face.LBPHFaceRecognizer_create()
         reconhecedor.train(rostos, np.array(rosto_ids))
         reconhecedor.save('modelo_reconhecimento.xml')
-        print("Modelo treinado e salvo com sucesso.")
-    else:
-        print("Nenhum rosto detectado para treinamento.")
+        messagebox.showinfo("Treinamento", "Modelo treinado com sucesso.")
 
-# Função para fazer login com reconhecimento facial
 def login_reconhecimento_facial_usuario():
-    print("Iniciando o reconhecimento facial...")
     reconhecedor = cv2.face.LBPHFaceRecognizer_create()
     reconhecedor.read('modelo_reconhecimento.xml')
-    print("Modelo carregado com sucesso.")
-
     classificador = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 
     cam = cv2.VideoCapture(0)
     cv2.namedWindow("Reconhecimento Facial")
-    reconhecido = False  # Variável para controle de reconhecimento
 
-    while not reconhecido:
-        print("Capturando imagem para reconhecimento...")
+    # Mensagem de leitura
+    cv2.putText(cam.read()[1], 'Posicione-se para o reconhecimento facial...', (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+    for i in range(3, 0, -1):  # Contagem regressiva
+        cv2.putText(cam.read()[1], f'Reconhecimento em: {i}', (50, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.imshow("Reconhecimento Facial", cam.read()[1])
+        cv2.waitKey(1000)
+
+    while True:
         ret, frame = cam.read()
         if not ret:
-            print("Falha ao capturar a imagem")
             break
 
         imagem_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         rostos_detectados = classificador.detectMultiScale(imagem_gray, scaleFactor=1.3, minNeighbors=5)
 
-        if len(rostos_detectados) == 0:
-            print("Nenhum rosto detectado.")
-
         for (x, y, w, h) in rostos_detectados:
             id_usuario, confianca = reconhecedor.predict(imagem_gray[y:y+h, x:x+w])
-            print(f"ID do usuário detectado: {id_usuario}, Confiança: {confianca}")
-
-            # Verificar se o ID do usuário é válido e consultar o nome
-            if confianca < 60:  # Ajuste o limiar de confiança aqui
-                c.execute("SELECT nome FROM usuarios WHERE id=?", (id_usuario,))  # Não adicione 1 aqui
+            if confianca < 60:
+                c.execute("SELECT nome FROM usuarios WHERE id=?", (id_usuario,))
                 resultado = c.fetchone()
                 if resultado:
                     nome_usuario = resultado[0]
-                    print(f"Usuário reconhecido: {nome_usuario}")
-                    messagebox.showinfo("Acesso Liberado", f"Acesso liberado com sucesso! Bem-vindo, {nome_usuario}")
-                    reconhecido = True  # Marcar como reconhecido
-                else:
-                    print("Usuário desconhecido para o ID fornecido.")
-                    cv2.putText(frame, 'Usuario desconhecido', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    mostrar_tela_boas_vindas(nome_usuario)
+                    cam.release()
+                    cv2.destroyAllWindows()
+                    return
             else:
-                print("Confiança alta. Usuário desconhecido.")
                 cv2.putText(frame, 'Usuario desconhecido', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
 
             cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
         cv2.imshow("Reconhecimento Facial", frame)
-
-        k = cv2.waitKey(1)
-        if k % 256 == 27:  # ESC
-            print("Fechando.")
+        if cv2.waitKey(1) % 256 == 27:
             break
 
     cam.release()
     cv2.destroyAllWindows()
 
-# Criação da janela principal
+def mostrar_tela_boas_vindas(nome_usuario):
+    # Cria uma nova janela de boas-vindas
+    welcome_window = tk.Toplevel()
+    welcome_window.title("Bem-vindo")
+    welcome_window.geometry("400x200")
+    welcome_window.configure(bg="#F0F4F8")
+    
+    # Mensagem de boas-vindas
+    mensagem = f"Bem-vindo ao sistema, {nome_usuario}!"
+    data_hora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    label_boas_vindas = tk.Label(welcome_window, text=mensagem, font=("Helvetica", 14, "bold"), bg="#F0F4F8")
+    label_boas_vindas.pack(pady=10)
+
+    label_data_hora = tk.Label(welcome_window, text=data_hora, font=("Helvetica", 12), bg="#F0F4F8")
+    label_data_hora.pack(pady=10)
+
+    # Botão de logoff
+    btn_logoff = ttk.Button(welcome_window, text="Logoff", command=welcome_window.destroy)
+    btn_logoff.pack(pady=20)
+
+# Janela principal
 root = tk.Tk()
-root.title("Cadastro de Usuário com Reconhecimento Facial")
+root.title("Cadastro e Login com Reconhecimento Facial")
+root.geometry("420x360")
+root.configure(bg="#F0F4F8")
+root.eval('tk::PlaceWindow . center')
 
-# Labels e Entradas
-label_nome = tk.Label(root, text="Nome:")
-label_nome.grid(row=0, column=0, padx=10, pady=10)
-entry_nome = tk.Entry(root)
-entry_nome.grid(row=0, column=1, padx=10, pady=10)
+# Frame do cabeçalho
+header_frame = tk.Frame(root, bg="#4A90E2", pady=10)
+header_frame.pack(fill='x')
 
-label_email = tk.Label(root, text="E-mail:")
-label_email.grid(row=1, column=0, padx=10, pady=10)
-entry_email = tk.Entry(root)
-entry_email.grid(row=1, column=1, padx=10, pady=10)
+header_label = tk.Label(header_frame, text="Sistema de Reconhecimento Facial", bg="#4A90E2", fg="white", font=("Helvetica", 16, "bold"))
+header_label.pack()
 
-label_numero = tk.Label(root, text="Número:")
-label_numero.grid(row=2, column=0, padx=10, pady=10)
-entry_numero = tk.Entry(root)
-entry_numero.grid(row=2, column=1, padx=10, pady=10)
+# Frame principal
+main_frame = tk.Frame(root, bg="#F0F4F8", padx=10, pady=20)
+main_frame.pack(fill='both', expand=True)
 
-# Botão para cadastrar o usuário
-btn_cadastrar = tk.Button(root, text="Cadastrar", command=cadastrar_usuario)
-btn_cadastrar.grid(row=3, column=1, padx=10, pady=10)
+# Campos de entrada
+label_nome = ttk.Label(main_frame, text="Nome:", background="#F0F4F8")
+label_nome.grid(row=0, column=0, padx=5, pady=5, sticky="e")
+entry_nome = ttk.Entry(main_frame, width=30)
+entry_nome.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
-# Botão para treinar reconhecimento facial
-btn_treinar = tk.Button(root, text="Treinar Reconhecimento", command=lambda: login_reconhecimento_facial('imagens/'))
-btn_treinar.grid(row=4, column=1, padx=10, pady=10)
+label_email = ttk.Label(main_frame, text="E-mail:", background="#F0F4F8")
+label_email.grid(row=1, column=0, padx=5, pady=5, sticky="e")
+entry_email = ttk.Entry(main_frame, width=30)
+entry_email.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-# Botão para reconhecer usuário
-btn_reconhecer = tk.Button(root, text="Reconhecer Usuário", command=login_reconhecimento_facial_usuario)
-btn_reconhecer.grid(row=5, column=1, padx=10, pady=10)
+label_numero = ttk.Label(main_frame, text="Número:", background="#F0F4F8")
+label_numero.grid(row=2, column=0, padx=5, pady=5, sticky="e")
+entry_numero = ttk.Entry(main_frame, width=30)
+entry_numero.grid(row=2, column=1, padx=5, pady=5, sticky="w")
 
-# Iniciar o loop da interface gráfica
+# Botões de ação
+button_frame = tk.Frame(main_frame, bg="#F0F4F8")
+button_frame.grid(row=4, column=0, columnspan=2, pady=15)
+
+btn_cadastrar = ttk.Button(button_frame, text="Cadastrar", command=cadastrar_usuario)
+btn_cadastrar.grid(row=0, column=0, padx=5)
+
+btn_treinar = ttk.Button(button_frame, text="Treinar Modelo", command=lambda: login_reconhecimento_facial("imagens"))
+btn_treinar.grid(row=0, column=1, padx=5)
+
+btn_login = ttk.Button(button_frame, text="Login", command=login_reconhecimento_facial_usuario)
+btn_login.grid(row=0, column=2, padx=5)
+
+# Iniciar o loop da interface
 root.mainloop()
 
 # Fechar a conexão com o banco de dados ao final
 conn.close()
+
